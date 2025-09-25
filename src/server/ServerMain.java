@@ -23,14 +23,9 @@ public class ServerMain {
             ScoreService scoreService = (ScoreService) new ScoreServiceImpl();
 
             // Bind các service vào Registry
-            Naming.rebind("rmi://localhost:1099/StudentService", studentService);
-            Naming.rebind("rmi://localhost:1099/SubjectService", subjectService);
-            Naming.rebind("rmi://localhost:1099/ScoreService", scoreService);
-
-            System.out.println(">>> Server đã khởi động và bind thành công các service:");
-            System.out.println("    - rmi://localhost:1099/StudentService");
-            System.out.println("    - rmi://localhost:1099/SubjectService");
-            System.out.println("    - rmi://localhost:1099/ScoreService");
+            Naming.bind("rmi://localhost:1099/StudentService", studentService);
+            Naming.bind("rmi://localhost:1099/SubjectService", subjectService);
+            Naming.bind("rmi://localhost:1099/ScoreService", scoreService);
 
         } catch (Exception e) {
             e.printStackTrace();

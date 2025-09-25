@@ -8,186 +8,286 @@ import service.StudentService;
 import service.SubjectService;
 
 import javax.swing.*;
-import javax.swing.border.TitledBorder;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
+import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.table.*;
+
+import com.formdev.flatlaf.icons.FlatRevealIcon;
+import com.formdev.flatlaf.icons.FlatSearchIcon;
+
 import java.awt.*;
 import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Vector;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class StudentPanel extends JPanel {
 
     private final StudentService studentService;
     private final SubjectService subjectService;
     private final ScoreService scoreService;
+
     private JTable studentTable;
     private DefaultTableModel studentModel;
+    private TableRowSorter<DefaultTableModel> sorter;
 
     public StudentPanel(StudentService studentService, SubjectService subjectService, ScoreService scoreService) {
         this.studentService = studentService;
         this.subjectService = subjectService;
         this.scoreService = scoreService;
 
-        setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(new Color(52, 152, 219), 2, true),
-                " Quản lý Sinh viên",
-                TitledBorder.LEFT, TitledBorder.TOP,
-                new Font("Segoe UI", Font.BOLD, 16),
-                new Color(44, 62, 80)
+        initUI();
+        loadStudents();
+    }
+
+    private void initUI() {
+        setLayout(new BorderLayout(12, 12));
+        setBorder(new EmptyBorder(12, 12, 12, 12));
+        setBackground(Color.WHITE);
+
+        // Header (tiêu đề phía trên bảng)
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(new Color(227, 242, 253)); // #e3f2fd
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(200, 225, 245)),
+                BorderFactory.createEmptyBorder(10, 12, 10, 12)
         ));
-        setBackground(new Color(245, 247, 250));
+
+        JLabel title = new JLabel("📚 Quản lý Sinh viên");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setForeground(new Color(33, 150, 243));
+        header.add(title, BorderLayout.WEST);
+
+        // Search + Refresh panel (phía trên bảng)
+        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        searchPanel.setOpaque(false);
+
+        JTextField tfSearch = new JTextField(24);
+        tfSearch.setToolTipText("Tìm kiếm (tìm trên tất cả cột)");
+        JButton btnRefresh = new JButton();
+        btnRefresh.setPreferredSize(new Dimension(36, 28));
+
+        // icon cho search và refresh
+        try {
+            FlatSearchIcon searchIcon = new FlatSearchIcon();
+            FlatRevealIcon refreshIcon = new FlatRevealIcon();
+            tfSearch.putClientProperty("JTextField.placeholderText", ""); // không dùng placeholder per yêu cầu
+            btnRefresh.setIcon(refreshIcon);
+        } catch (Exception ignored) {
+        }
+        btnRefresh.setToolTipText("Làm mới dữ liệu");
+
+        searchPanel.add(tfSearch);
+        searchPanel.add(btnRefresh);
+
+        header.add(searchPanel, BorderLayout.EAST);
+        add(header, BorderLayout.NORTH);
 
         // Bảng Sinh viên
-        studentModel = new DefaultTableModel(
-                new Object[]{"MSV", "Tên", "Ngày sinh", "Quê quán", "Điểm TB"}, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
+        studentModel = new DefaultTableModel(new Object[]{"MSV", "Tên", "Ngày sinh", "Quê quán", "Điểm TB"}, 0) {
+            private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(int row, int column) { return false; }
         };
         studentTable = new JTable(studentModel);
         studentTable.setRowHeight(28);
         studentTable.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        studentTable.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 15));
-        studentTable.getTableHeader().setBackground(new Color(200, 230, 255));
-        studentTable.setSelectionBackground(new Color(135, 206, 250));
-        studentTable.setGridColor(new Color(220, 220, 220));
+        studentTable.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 14));
+        studentTable.setGridColor(new Color(230,230,230));
+        studentTable.setSelectionBackground(new Color(212, 235, 255));
 
-        // Căn giữa cột Điểm TB
-        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
-        centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
-        studentTable.getColumnModel().getColumn(4).setCellRenderer(centerRenderer);
+        // center align điểm
+        DefaultTableCellRenderer center = new DefaultTableCellRenderer();
+        center.setHorizontalAlignment(SwingConstants.CENTER);
+        studentTable.getColumnModel().getColumn(4).setCellRenderer(center);
 
-        JScrollPane scrollPane = new JScrollPane(studentTable);
-        add(scrollPane, BorderLayout.CENTER);
+        sorter = new TableRowSorter<>(studentModel);
+        studentTable.setRowSorter(sorter);
 
-        // Nút chức năng
-        JButton btnAdd = createStyledButton(" Thêm", new Color(46, 204, 113));
-        JButton btnEdit = createStyledButton(" Sửa", new Color(52, 152, 219));
-        JButton btnDelete = createStyledButton(" Xóa", new Color(231, 76, 60));
-        JButton btnRefresh = createStyledButton(" Làm mới", new Color(155, 89, 182));
+        JScrollPane scroll = new JScrollPane(studentTable);
+        add(scroll, BorderLayout.CENTER);
 
-        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
-        south.setBackground(new Color(245, 249, 255));
-        south.add(btnAdd);
-        south.add(btnEdit);
-        south.add(btnDelete);
-        south.add(btnRefresh);
-        add(south, BorderLayout.SOUTH);
+        // Footer buttons (Add / Edit / Delete)
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 8));
+        footer.setBackground(Color.WHITE);
 
-        // Load danh sách sinh viên
-        loadStudents();
+        JButton btnAdd = styledButton("➕ Thêm", new Color(39, 174, 96));
+        JButton btnEdit = styledButton("✏️ Sửa", new Color(41, 128, 185));
+        JButton btnDelete = styledButton("🗑 Xóa", new Color(231, 76, 60));
+        JButton btnDetail = styledButton("🔎 Chi tiết", new Color(108, 99, 255));
+        JButton btnRefreshBottom = styledButton("Làm mới", new Color(96, 125, 139));
 
-        // Sự kiện các nút
-        btnAdd.addActionListener(e -> addStudentDialog());
-        btnEdit.addActionListener(e -> editStudentDialog(getSelectedStudent()));
-        btnDelete.addActionListener(e -> deleteStudentAction());
+        footer.add(btnDetail);
+        footer.add(btnAdd);
+        footer.add(btnEdit);
+        footer.add(btnDelete);
+        footer.add(btnRefreshBottom);
+
+        add(footer, BorderLayout.SOUTH);
+
+        // Event: search realtime
+        tfSearch.getDocument().addDocumentListener(new DocumentListener() {
+            private void filter() {
+                String text = tfSearch.getText().trim();
+                if (text.isEmpty()) {
+                    sorter.setRowFilter(null);
+                    return;
+                }
+                try {
+                    // (?i) không phân biệt hoa thường, lọc tất cả cột
+                    sorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(text)));
+                } catch (PatternSyntaxException ex) {
+                    sorter.setRowFilter(null);
+                }
+            }
+            @Override public void insertUpdate(DocumentEvent e) { filter(); }
+            @Override public void removeUpdate(DocumentEvent e) { filter(); }
+            @Override public void changedUpdate(DocumentEvent e) { filter(); }
+        });
+
+        // Event: refresh
         btnRefresh.addActionListener(e -> loadStudents());
+        btnRefreshBottom.addActionListener(e -> loadStudents());
 
+        // CRUD events
+        btnAdd.addActionListener(e -> showAddDialog());
+        btnEdit.addActionListener(e -> {
+            int row = studentTable.getSelectedRow();
+            if (row == -1) { JOptionPane.showMessageDialog(this, "Chọn sinh viên để sửa"); return; }
+            int modelRow = studentTable.convertRowIndexToModel(row);
+            Student s = getStudentFromModel(modelRow);
+            showEditDialog(s);
+        });
+        btnDelete.addActionListener(e -> {
+            int row = studentTable.getSelectedRow();
+            if (row == -1) { JOptionPane.showMessageDialog(this, "Chọn sinh viên để xóa"); return; }
+            int modelRow = studentTable.convertRowIndexToModel(row);
+            Student s = getStudentFromModel(modelRow);
+            int confirm = JOptionPane.showConfirmDialog(this, "Xóa sinh viên " + s.getMsv() + " ?", "Xác nhận", JOptionPane.YES_NO_OPTION);
+            if (confirm == JOptionPane.YES_OPTION) {
+                try {
+                    studentService.deleteStudent(s.getMsv());
+                    // đảm bảo xóa điểm liên quan (nếu DB có cascade thì DB sẽ xử lý)
+                    loadStudents();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this, "Lỗi xóa: " + ex.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
 
-        // Double click -> xem chi tiết
+        btnDetail.addActionListener(e -> {
+            int row = studentTable.getSelectedRow();
+            if (row == -1) { JOptionPane.showMessageDialog(this, "Chọn sinh viên để xem chi tiết"); return; }
+            int modelRow = studentTable.convertRowIndexToModel(row);
+            Student s = getStudentFromModel(modelRow);
+            showDetailDialog(s);
+        });
+
+        // double-click để xem chi tiết
         studentTable.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
-                if (e.getClickCount() == 2 && studentTable.getSelectedRow() != -1) {
-                    Student s = getSelectedStudent();
-                    showStudentDetail(s);
+                if (e.getClickCount() == 2) {
+                    int row = studentTable.getSelectedRow();
+                    if (row != -1) {
+                        int modelRow = studentTable.convertRowIndexToModel(row);
+                        Student s = getStudentFromModel(modelRow);
+                        showDetailDialog(s);
+                    }
                 }
             }
         });
     }
 
-    private JButton createStyledButton(String text, Color bgColor) {
-        JButton button = new JButton(text);
-        button.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        button.setForeground(Color.WHITE);
-        button.setBackground(bgColor);
-        button.setOpaque(true);
-        button.setBorderPainted(false);
-        button.setPreferredSize(new Dimension(120, 38));
-        return button;
+    private JButton styledButton(String text, Color bg) {
+        JButton b = new JButton(text);
+        b.setFont(b.getFont().deriveFont(Font.BOLD, 13f));
+        b.setForeground(Color.WHITE);
+        b.setBackground(bg);
+        b.setBorderPainted(false);
+        b.setFocusPainted(false);
+        b.setPreferredSize(new Dimension(110, 32));
+        return b;
     }
 
-    private Student getSelectedStudent() {
-        int row = studentTable.getSelectedRow();
-        if (row == -1) return null;
+    private Student getStudentFromModel(int row) {
         String msv = (String) studentModel.getValueAt(row, 0);
         String ten = (String) studentModel.getValueAt(row, 1);
-        LocalDate ngaySinh = LocalDate.parse(studentModel.getValueAt(row, 2).toString());
+        LocalDate ngaySinh = studentModel.getValueAt(row, 2) != null ?
+                LocalDate.parse(studentModel.getValueAt(row, 2).toString()) : null;
         String queQuan = (String) studentModel.getValueAt(row, 3);
-        double diemTB = Double.parseDouble(studentModel.getValueAt(row, 4).toString());
-        return new Student(msv, ten, ngaySinh, queQuan, diemTB);
+        double diem = 0.0;
+        try { diem = Double.parseDouble(studentModel.getValueAt(row, 4).toString()); } catch (Exception ignored) {}
+        return new Student(msv, ten, ngaySinh, queQuan, diem);
     }
 
-    private void loadStudents() {
+    // =========================
+    // Load dữ liệu
+    // =========================
+    public void loadStudents() {
         try {
             List<Student> students = studentService.getAllStudents();
             studentModel.setRowCount(0);
             for (Student s : students) {
-                studentModel.addRow(new Object[]{s.getMsv(), s.getTen(), s.getNgaySinh(),
+                studentModel.addRow(new Object[]{s.getMsv(), s.getTen(),
+                        s.getNgaySinh() != null ? s.getNgaySinh().toString() : "",
                         s.getQueQuan(), s.getDiemTB()});
             }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "❌ Lỗi load dữ liệu: " + e.getMessage());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Lỗi khi lấy danh sách sinh viên: " + ex.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
         }
     }
 
-    // ============================
-    // Dialog thêm sinh viên
-    // ============================
-    private void addStudentDialog() {
-        JDialog dialog = createDialog("➕ Thêm Sinh viên");
+    // =========================
+    // Dialog thêm / sửa
+    // =========================
+    private void showAddDialog() {
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "Thêm sinh viên", Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setSize(420, 300);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10,10));
 
-        JTextField txtMsv = new JTextField();
-        JTextField txtTen = new JTextField();
-        JTextField txtNgaySinh = new JTextField("2000-01-01");
-        JTextField txtQueQuan = new JTextField();
+        JPanel form = new JPanel(new GridLayout(0,2,8,8));
+        form.setBorder(new EmptyBorder(12,12,12,12));
 
-        JPanel form = createFormPanel(
-                new String[]{"Mã SV:", "Tên:", "Ngày sinh (yyyy-MM-dd):", "Quê quán:"},
-                new JComponent[]{txtMsv, txtTen, txtNgaySinh, txtQueQuan}
-        );
+        JTextField tfMsv = new JTextField();
+        JTextField tfTen = new JTextField();
+        JTextField tfNgaySinh = new JTextField("2000-01-01");
+        JTextField tfQueQuan = new JTextField();
+
+        form.add(new JLabel("MSV:")); form.add(tfMsv);
+        form.add(new JLabel("Tên:")); form.add(tfTen);
+        form.add(new JLabel("Ngày sinh (yyyy-MM-dd):")); form.add(tfNgaySinh);
+        form.add(new JLabel("Quê quán:")); form.add(tfQueQuan);
+
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton btnSave = styledButton("Lưu", new Color(39, 174, 96));
+        JButton btnCancel = styledButton("Hủy", new Color(149, 165, 166));
+        buttons.add(btnSave); buttons.add(btnCancel);
+
         dialog.add(form, BorderLayout.CENTER);
-
-        JButton btnSave = createStyledButton("💾 Lưu", new Color(39, 174, 96));
-        JButton btnCancel = createStyledButton("❌ Hủy", new Color(149, 165, 166));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottom.add(btnSave);
-        bottom.add(btnCancel);
-        dialog.add(bottom, BorderLayout.SOUTH);
+        dialog.add(buttons, BorderLayout.SOUTH);
 
         btnSave.addActionListener(e -> {
+            // Validation cơ bản
+            if (tfMsv.getText().trim().isEmpty() || tfTen.getText().trim().isEmpty()) {
+                JOptionPane.showMessageDialog(dialog, "MSV và Tên không được để trống", "Lỗi", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
             try {
-                String msv = txtMsv.getText().trim();
-                String ten = txtTen.getText().trim();
-                String ngaySinhStr = txtNgaySinh.getText().trim();
-                String queQuan = txtQueQuan.getText().trim();
-
-                if (msv.isEmpty() || ten.isEmpty() || queQuan.isEmpty()) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Vui lòng nhập đầy đủ thông tin!");
-                    return;
-                }
-                try {
-                    LocalDate.parse(ngaySinhStr);
-                } catch (DateTimeParseException ex) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Ngày sinh không hợp lệ!");
-                    return;
-                }
-
-                if (studentService.findStudentById(msv) != null) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Mã SV đã tồn tại!");
-                    return;
-                }
-
-                Student s = new Student(msv, ten, LocalDate.parse(ngaySinhStr), queQuan, 0.0);
+                LocalDate.parse(tfNgaySinh.getText().trim()); // nếu sai sẽ ném exception
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, "Ngày sinh phải dạng yyyy-MM-dd", "Lỗi", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            try {
+                Student s = new Student(tfMsv.getText().trim(), tfTen.getText().trim(),
+                        LocalDate.parse(tfNgaySinh.getText().trim()), tfQueQuan.getText().trim(), 0.0);
                 studentService.addStudent(s);
-                JOptionPane.showMessageDialog(dialog, "✅ Thêm thành công!");
                 loadStudents();
                 dialog.dispose();
             } catch (Exception ex) {
-                JOptionPane.showMessageDialog(dialog, "❌ Lỗi: " + ex.getMessage());
+                JOptionPane.showMessageDialog(dialog, "Lỗi khi thêm: " + ex.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
             }
         });
 
@@ -195,66 +295,54 @@ public class StudentPanel extends JPanel {
         dialog.setVisible(true);
     }
 
-    // ============================
-    // Dialog sửa sinh viên
-    // ============================
-    private void editStudentDialog(Student s) {
-        if (s == null) {
-            JOptionPane.showMessageDialog(this, "⚠ Vui lòng chọn sinh viên để sửa!");
-            return;
-        }
+    private void showEditDialog(Student s) {
+        if (s == null) return;
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "Sửa sinh viên", Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setSize(420, 300);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10,10));
 
-        JDialog dialog = createDialog("✏️ Sửa Sinh viên");
+        JPanel form = new JPanel(new GridLayout(0,2,8,8));
+        form.setBorder(new EmptyBorder(12,12,12,12));
 
-        JTextField txtMsv = new JTextField(s.getMsv());
-        txtMsv.setEditable(false);
-        JTextField txtTen = new JTextField(s.getTen());
-        JTextField txtNgaySinh = new JTextField(s.getNgaySinh().toString());
-        JTextField txtQueQuan = new JTextField(s.getQueQuan());
+        JTextField tfMsv = new JTextField(s.getMsv());
+        tfMsv.setEditable(false);
+        JTextField tfTen = new JTextField(s.getTen());
+        JTextField tfNgaySinh = new JTextField(s.getNgaySinh() != null ? s.getNgaySinh().toString() : "");
+        JTextField tfQueQuan = new JTextField(s.getQueQuan());
 
-        JPanel form = createFormPanel(
-                new String[]{"Mã SV:", "Tên:", "Ngày sinh:", "Quê quán:"},
-                new JComponent[]{txtMsv, txtTen, txtNgaySinh, txtQueQuan}
-        );
+        form.add(new JLabel("MSV:")); form.add(tfMsv);
+        form.add(new JLabel("Tên:")); form.add(tfTen);
+        form.add(new JLabel("Ngày sinh (yyyy-MM-dd):")); form.add(tfNgaySinh);
+        form.add(new JLabel("Quê quán:")); form.add(tfQueQuan);
+
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton btnSave = styledButton("Lưu", new Color(41, 128, 185));
+        JButton btnCancel = styledButton("Hủy", new Color(149, 165, 166));
+        buttons.add(btnSave); buttons.add(btnCancel);
+
         dialog.add(form, BorderLayout.CENTER);
-
-        JButton btnSave = createStyledButton("💾 Lưu", new Color(41, 128, 185));
-        JButton btnCancel = createStyledButton("❌ Hủy", new Color(149, 165, 166));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottom.add(btnSave);
-        bottom.add(btnCancel);
-        dialog.add(bottom, BorderLayout.SOUTH);
+        dialog.add(buttons, BorderLayout.SOUTH);
 
         btnSave.addActionListener(e -> {
+            if (tfTen.getText().trim().isEmpty()) {
+                JOptionPane.showMessageDialog(dialog, "Tên không được để trống", "Lỗi", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
             try {
-                String ten = txtTen.getText().trim();
-                String ngaySinhStr = txtNgaySinh.getText().trim();
-                String queQuan = txtQueQuan.getText().trim();
-
-                if (ten.isEmpty() || queQuan.isEmpty()) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Không được để trống tên hoặc quê quán!");
-                    return;
-                }
-                try {
-                    LocalDate.parse(ngaySinhStr);
-                } catch (DateTimeParseException ex) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Ngày sinh không hợp lệ!");
-                    return;
-                }
-
-                Student updated = new Student(
-                        s.getMsv(),
-                        ten,
-                        LocalDate.parse(ngaySinhStr),
-                        queQuan,
-                        s.getDiemTB()
-                );
+                LocalDate.parse(tfNgaySinh.getText().trim());
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, "Ngày sinh phải dạng yyyy-MM-dd", "Lỗi", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            try {
+                Student updated = new Student(s.getMsv(), tfTen.getText().trim(),
+                        LocalDate.parse(tfNgaySinh.getText().trim()), tfQueQuan.getText().trim(), s.getDiemTB());
                 studentService.updateStudent(updated);
-                JOptionPane.showMessageDialog(dialog, "✅ Cập nhật thành công!");
                 loadStudents();
                 dialog.dispose();
             } catch (Exception ex) {
-                JOptionPane.showMessageDialog(dialog, "❌ Lỗi khi cập nhật: " + ex.getMessage());
+                JOptionPane.showMessageDialog(dialog, "Lỗi khi cập nhật: " + ex.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
             }
         });
 
@@ -262,108 +350,47 @@ public class StudentPanel extends JPanel {
         dialog.setVisible(true);
     }
 
-    // ============================
-    // Xóa sinh viên
-    // ============================
-    private void deleteStudentAction() {
-        Student s = getSelectedStudent();
-        if (s == null) {
-            JOptionPane.showMessageDialog(this, "⚠ Chọn SV để xóa");
-            return;
-        }
-        int confirm = JOptionPane.showConfirmDialog(this,
-                "Xóa SV " + s.getMsv() + " ?", "Xác nhận", JOptionPane.YES_NO_OPTION);
-        if (confirm == JOptionPane.YES_OPTION) {
-            try {
-                studentService.deleteStudent(s.getMsv());
-                loadStudents();
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, "❌ Lỗi xóa SV: " + e.getMessage());
-            }
-        }
-    }
-
-    // ============================
-    // Dialog chi tiết sinh viên
-    // ============================
-    private void showStudentDetail(Student s) {
+    // Chi tiết: hiển thị thông tin sinh viên + bảng điểm
+    private void showDetailDialog(Student s) {
         if (s == null) return;
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "Chi tiết sinh viên", Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setSize(760, 520);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10,10));
 
-        JDialog dialog = createDialog("📖 Chi tiết Sinh viên");
-        dialog.setSize(750, 480);
+        JPanel info = new JPanel(new GridLayout(0,1));
+        info.setBorder(BorderFactory.createTitledBorder("Thông tin sinh viên"));
+        info.add(new JLabel("MSV: " + s.getMsv()));
+        info.add(new JLabel("Tên: " + s.getTen()));
+        info.add(new JLabel("Ngày sinh: " + (s.getNgaySinh()!=null ? s.getNgaySinh().toString() : "")));
+        info.add(new JLabel("Quê quán: " + s.getQueQuan()));
+        info.add(new JLabel("Điểm trung bình: " + s.getDiemTB()));
 
-        // Thông tin cơ bản
-        JPanel infoPanel = new JPanel(new GridLayout(0, 1, 5, 5));
-        infoPanel.setBorder(BorderFactory.createTitledBorder("Thông tin"));
-        infoPanel.setBackground(new Color(245, 247, 250));
-        infoPanel.add(new JLabel("Mã SV: " + s.getMsv()));
-        infoPanel.add(new JLabel("Tên: " + s.getTen()));
-        infoPanel.add(new JLabel("Ngày sinh: " + s.getNgaySinh()));
-        infoPanel.add(new JLabel("Quê quán: " + s.getQueQuan()));
-        infoPanel.add(new JLabel("Điểm TB: " + s.getDiemTB()));
-        dialog.add(infoPanel, BorderLayout.NORTH);
+        dialog.add(info, BorderLayout.NORTH);
 
-        // Bảng điểm
-        DefaultTableModel scoreModel = new DefaultTableModel(new Object[]{"Mã môn", "Tên môn", "Điểm"}, 0);
-        JTable scoreTable = new JTable(scoreModel);
-        scoreTable.setRowHeight(26);
-        scoreTable.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        scoreTable.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 14));
-        scoreTable.getTableHeader().setBackground(new Color(220, 220, 220));
+        DefaultTableModel scModel = new DefaultTableModel(new Object[]{"Mã môn","Tên môn","Điểm"},0);
+        JTable scTable = new JTable(scModel);
+        scTable.setRowHeight(24);
 
         try {
             List<Score> scores = scoreService.getAllScores();
             for (Score sc : scores) {
                 if (sc.getMsv().equals(s.getMsv())) {
                     Subject subj = subjectService.findSubjectById(sc.getMaMon());
-                    scoreModel.addRow(new Object[]{sc.getMaMon(), subj != null ? subj.getTenMon() : "N/A", sc.getDiem()});
+                    scModel.addRow(new Object[]{sc.getMaMon(), subj!=null?subj.getTenMon():sc.getMaMon(), sc.getDiem()});
                 }
             }
         } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "❌ Lỗi load điểm: " + ex.getMessage());
+            JOptionPane.showMessageDialog(this, "Lỗi khi load điểm: " + ex.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
         }
-        dialog.add(new JScrollPane(scoreTable), BorderLayout.CENTER);
 
-        JButton btnClose = createStyledButton("Đóng", new Color(127, 140, 141));
-        btnClose.addActionListener(e -> dialog.dispose());
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottom.add(btnClose);
-        dialog.add(bottom, BorderLayout.SOUTH);
+        dialog.add(new JScrollPane(scTable), BorderLayout.CENTER);
+        JPanel btnP = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton bClose = styledButton("Đóng", new Color(125, 134, 139));
+        bClose.addActionListener(e -> dialog.dispose());
+        btnP.add(bClose);
+        dialog.add(btnP, BorderLayout.SOUTH);
 
         dialog.setVisible(true);
-    }
-
-    // ============================
-    // Helper
-    // ============================
-    private JDialog createDialog(String title) {
-        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), title, true);
-        dialog.setSize(420, 300);
-        dialog.setLocationRelativeTo(this);
-        dialog.setLayout(new BorderLayout(10, 10));
-        dialog.getContentPane().setBackground(new Color(245, 247, 250));
-        return dialog;
-    }
-
-    private JPanel createFormPanel(String[] labels, JComponent[] fields) {
-        JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBackground(new Color(245, 247, 250));
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-
-        for (int i = 0; i < labels.length; i++) {
-            gbc.gridx = 0;
-            gbc.gridy = i;
-            gbc.weightx = 0.3;
-            JLabel label = new JLabel(labels[i]);
-            label.setFont(new Font("Segoe UI", Font.BOLD, 13));
-            panel.add(label, gbc);
-
-            gbc.gridx = 1;
-            gbc.weightx = 0.7;
-            panel.add(fields[i], gbc);
-        }
-        return panel;
     }
 }

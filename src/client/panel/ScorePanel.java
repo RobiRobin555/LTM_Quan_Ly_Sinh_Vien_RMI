@@ -1,308 +1,194 @@
 package client.panel;
 
+import com.formdev.flatlaf.icons.FlatRevealIcon;
+
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import model.Score;
-import model.Student;
-import model.Subject;
 import service.ScoreService;
-import service.StudentService;
-import service.SubjectService;
 
 import javax.swing.*;
-import javax.swing.border.TitledBorder;
-import javax.swing.table.DefaultTableModel;
+import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.table.*;
 import java.awt.*;
 import java.util.List;
+import java.util.regex.PatternSyntaxException;
 
 public class ScorePanel extends JPanel {
 
     private final ScoreService scoreService;
-    private final StudentService studentService;
-    private final SubjectService subjectService;
     private JTable scoreTable;
-    private DefaultTableModel scoreModel;
+    private DefaultTableModel model;
+    private TableRowSorter<DefaultTableModel> sorter;
 
-    public ScorePanel(ScoreService scoreService, StudentService studentService, SubjectService subjectService) {
+    public ScorePanel(ScoreService scoreService) {
         this.scoreService = scoreService;
-        this.studentService = studentService;
-        this.subjectService = subjectService;
+        initUI();
+        loadScores();
+    }
 
-        setLayout(new BorderLayout(10, 10));
-        setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(new Color(155, 89, 182), 2, true),
-                " Quản lý Điểm",
-                TitledBorder.LEFT, TitledBorder.TOP,
-                new Font("Segoe UI", Font.BOLD, 16),
-                new Color(52, 73, 94)
+    private void initUI() {
+        setLayout(new BorderLayout(12,12));
+        setBorder(new EmptyBorder(12,12,12,12));
+        setBackground(Color.WHITE);
+
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(new Color(227, 242, 253));
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(200,225,245)),
+                BorderFactory.createEmptyBorder(10,12,10,12)
         ));
-        setBackground(new Color(250, 248, 255));
+        JLabel title = new JLabel("📊 Quản lý Điểm");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setForeground(new Color(33,150,243));
+        header.add(title, BorderLayout.WEST);
 
-        // Bảng điểm
-        scoreModel = new DefaultTableModel(
-                new Object[]{"MSV", "Tên SV", "Mã môn", "Tên môn", "Điểm"}, 0) {
-            @Override
-            public boolean isCellEditable(int row, int col) {
-                return false;
-            }
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.setOpaque(false);
+        JTextField tfSearch = new JTextField(24);
+        tfSearch.setToolTipText("Tìm kiếm (tìm trên tất cả cột)");
+        JButton btnRefresh = new JButton(); btnRefresh.setPreferredSize(new Dimension(36,28));
+        try { btnRefresh.setIcon(new FlatRevealIcon()); } catch (Exception ignored) {}
+        right.add(tfSearch); right.add(btnRefresh);
+        header.add(right, BorderLayout.EAST);
+        add(header, BorderLayout.NORTH);
+
+        model = new DefaultTableModel(new Object[]{"ID","MSV","Mã Môn","Điểm"},0) {
+            private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(int row, int col) { return false; }
         };
-        scoreTable = new JTable(scoreModel);
+        scoreTable = new JTable(model);
         scoreTable.setRowHeight(28);
         scoreTable.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        scoreTable.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 15));
-        scoreTable.getTableHeader().setBackground(new Color(230, 220, 255));
-        scoreTable.setSelectionBackground(new Color(186, 145, 221));
-        scoreTable.setGridColor(new Color(210, 210, 210));
+        scoreTable.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 14));
+        JScrollPane scroll = new JScrollPane(scoreTable);
+        add(scroll, BorderLayout.CENTER);
 
-        add(new JScrollPane(scoreTable), BorderLayout.CENTER);
+        sorter = new TableRowSorter<>(model);
+        scoreTable.setRowSorter(sorter);
 
-        // Nút chức năng
-        JButton btnAdd = createStyledButton(" Thêm", new Color(46, 204, 113));
-        JButton btnEdit = createStyledButton(" Sửa", new Color(52, 152, 219));
-        JButton btnDelete = createStyledButton(" Xóa", new Color(231, 76, 60));
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT,8,8));
+        footer.setBackground(Color.WHITE);
+        JButton btnAdd = styledButton("➕ Thêm", new Color(39,174,96));
+        JButton btnEdit = styledButton("✏️ Sửa", new Color(41,128,185));
+        JButton btnDelete = styledButton("🗑 Xóa", new Color(231,76,60));
+        JButton btnRefreshBottom = styledButton("Làm mới", new Color(96,125,139));
+        footer.add(btnAdd); footer.add(btnEdit); footer.add(btnDelete); footer.add(btnRefreshBottom);
+        add(footer, BorderLayout.SOUTH);
 
-        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
-        south.setBackground(new Color(250, 248, 255));
-        south.add(btnAdd);
-        south.add(btnEdit);
-        south.add(btnDelete);
-        add(south, BorderLayout.SOUTH);
+        // search realtime
+        tfSearch.getDocument().addDocumentListener(new DocumentListener() {
+            private void filter() {
+                String t = tfSearch.getText().trim();
+                if (t.isEmpty()) { sorter.setRowFilter(null); return; }
+                try { sorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(t))); } catch (PatternSyntaxException ex) { sorter.setRowFilter(null); }
+            }
+            public void insertUpdate(DocumentEvent e) { filter(); }
+            public void removeUpdate(DocumentEvent e) { filter(); }
+            public void changedUpdate(DocumentEvent e) { filter(); }
+        });
 
-        // Load dữ liệu
-        loadScores();
+        btnRefresh.addActionListener(e -> loadScores());
+        btnRefreshBottom.addActionListener(e -> loadScores());
 
-        // Sự kiện
         btnAdd.addActionListener(e -> addScoreDialog());
-        btnEdit.addActionListener(e -> editScoreDialog(getSelectedScore()));
+        btnEdit.addActionListener(e -> {
+            int row = scoreTable.getSelectedRow();
+            if (row == -1) { JOptionPane.showMessageDialog(this, "Chọn điểm để sửa"); return; }
+            int modelRow = scoreTable.convertRowIndexToModel(row);
+            int id = Integer.parseInt(model.getValueAt(modelRow,0).toString());
+            String msv = model.getValueAt(modelRow,1).toString();
+            String maMon = model.getValueAt(modelRow,2).toString();
+            double diem = Double.parseDouble(model.getValueAt(modelRow,3).toString());
+            editScoreDialog(id, msv, maMon, diem);
+        });
         btnDelete.addActionListener(e -> deleteScoreAction());
     }
 
-    private JButton createStyledButton(String text, Color bgColor) {
-        JButton btn = new JButton(text);
-        btn.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        btn.setForeground(Color.WHITE);
-        btn.setBackground(bgColor);
-        btn.setBorderPainted(false);
-        btn.setFocusPainted(false);
-        btn.setPreferredSize(new Dimension(120, 38));
-        return btn;
+    private JButton styledButton(String text, Color bg) {
+        JButton b = new JButton(text);
+        b.setFont(b.getFont().deriveFont(Font.BOLD, 13f));
+        b.setForeground(Color.WHITE);
+        b.setBackground(bg);
+        b.setBorderPainted(false);
+        b.setFocusPainted(false);
+        b.setPreferredSize(new Dimension(110, 32));
+        return b;
     }
 
-    private Score getSelectedScore() {
-        int row = scoreTable.getSelectedRow();
-        if (row == -1) return null;
-        String msv = (String) scoreModel.getValueAt(row, 0);
-        String maMon = (String) scoreModel.getValueAt(row, 2);
-        double diem = Double.parseDouble(scoreModel.getValueAt(row, 4).toString());
-        return new Score(msv, maMon, diem);
-    }
-
-    private void loadScores() {
+    public void loadScores() {
         try {
-            List<Score> scores = scoreService.getAllScores();
-            scoreModel.setRowCount(0);
-            for (Score sc : scores) {
-                Student st = studentService.findStudentById(sc.getMsv());
-                Subject subj = subjectService.findSubjectById(sc.getMaMon());
-                scoreModel.addRow(new Object[]{
-                        sc.getMsv(),
-                        st != null ? st.getTen() : "N/A",
-                        sc.getMaMon(),
-                        subj != null ? subj.getTenMon() : "N/A",
-                        sc.getDiem()
-                });
+            List<Score> list = scoreService.getAllScores();
+            model.setRowCount(0);
+            for (Score s : list) {
+                model.addRow(new Object[]{s.getId(), s.getMsv(), s.getMaMon(), s.getDiem()});
             }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "❌ Lỗi load điểm: " + e.getMessage());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Lỗi khi lấy điểm: " + ex.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
         }
     }
 
-    // ============================
-    // Dialog thêm điểm
-    // ============================
     private void addScoreDialog() {
-        JDialog dialog = createDialog("➕ Thêm Điểm");
+        JDialog d = new JDialog(SwingUtilities.getWindowAncestor(this), "Thêm điểm", Dialog.ModalityType.APPLICATION_MODAL);
+        d.setSize(420,260); d.setLocationRelativeTo(this);
+        JPanel p = new JPanel(new GridLayout(0,2,8,8)); p.setBorder(new EmptyBorder(12,12,12,12));
+        JTextField tfMsv = new JTextField(); JTextField tfMa = new JTextField(); JTextField tfDiem = new JTextField();
+        p.add(new JLabel("MSV:")); p.add(tfMsv);
+        p.add(new JLabel("Mã môn:")); p.add(tfMa);
+        p.add(new JLabel("Điểm:")); p.add(tfDiem);
+        JPanel btnP = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton bs = styledButton("Lưu", new Color(39,174,96)); JButton bc = styledButton("Hủy", new Color(149,165,166));
+        btnP.add(bs); btnP.add(bc);
+        d.add(p, BorderLayout.CENTER); d.add(btnP, BorderLayout.SOUTH);
 
-        JComboBox<String> cbMsv = new JComboBox<>();
-        JComboBox<String> cbMaMon = new JComboBox<>();
-        JTextField txtDiem = new JTextField();
-
-        try {
-            for (Student st : studentService.getAllStudents()) cbMsv.addItem(st.getMsv());
-            for (Subject sub : subjectService.getAllSubjects()) cbMaMon.addItem(sub.getMaMon());
-        } catch (Exception ignored) {}
-
-        JPanel form = createFormPanel(
-                new String[]{"Mã SV:", "Mã môn:", "Điểm:"},
-                new JComponent[]{cbMsv, cbMaMon, txtDiem}
-        );
-        dialog.add(form, BorderLayout.CENTER);
-
-        JButton btnSave = createStyledButton("💾 Lưu", new Color(39, 174, 96));
-        JButton btnCancel = createStyledButton("❌ Hủy", new Color(149, 165, 166));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottom.add(btnSave);
-        bottom.add(btnCancel);
-        dialog.add(bottom, BorderLayout.SOUTH);
-
-        btnSave.addActionListener(e -> {
-            try {
-                String msv = (String) cbMsv.getSelectedItem();
-                String maMon = (String) cbMaMon.getSelectedItem();
-                String diemStr = txtDiem.getText().trim();
-
-                if (msv == null || maMon == null || diemStr.isEmpty()) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Vui lòng nhập đầy đủ!");
-                    return;
-                }
-                double diem;
-                try {
-                    diem = Double.parseDouble(diemStr);
-                    if (diem < 0 || diem > 10) throw new NumberFormatException();
-                } catch (NumberFormatException ex) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Điểm phải nằm trong khoảng 0 - 10!");
-                    return;
-                }
-
-                // Tránh trùng
-                for (int i = 0; i < scoreModel.getRowCount(); i++) {
-                    if (scoreModel.getValueAt(i, 0).equals(msv) &&
-                        scoreModel.getValueAt(i, 2).equals(maMon)) {
-                        JOptionPane.showMessageDialog(dialog, "⚠ Điểm cho SV và môn này đã tồn tại!");
-                        return;
-                    }
-                }
-
-                Score sc = new Score(msv, maMon, diem);
-                scoreService.addScore(sc);
-                JOptionPane.showMessageDialog(dialog, "✅ Thêm thành công!");
-                loadScores();
-                dialog.dispose();
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(dialog, "❌ Lỗi thêm điểm: " + ex.getMessage());
-            }
+        bs.addActionListener(e -> {
+            if (tfMsv.getText().trim().isEmpty() || tfMa.getText().trim().isEmpty()) { JOptionPane.showMessageDialog(d, "MSV và Mã môn không được trống"); return; }
+            double diem;
+            try { diem = Double.parseDouble(tfDiem.getText().trim()); if (diem < 0 || diem > 10) throw new NumberFormatException(); }
+            catch (Exception ex) { JOptionPane.showMessageDialog(d, "Điểm phải là số trong khoảng 0 - 10"); return; }
+            try { scoreService.addScore(new Score(tfMsv.getText().trim(), tfMa.getText().trim(), diem)); loadScores(); d.dispose(); }
+            catch (Exception ex) { JOptionPane.showMessageDialog(d, "Lỗi khi thêm: " + ex.getMessage()); }
         });
-
-        btnCancel.addActionListener(e -> dialog.dispose());
-        dialog.setVisible(true);
+        bc.addActionListener(e -> d.dispose());
+        d.setVisible(true);
     }
 
-    // ============================
-    // Dialog sửa điểm
-    // ============================
-    private void editScoreDialog(Score s) {
-        if (s == null) {
-            JOptionPane.showMessageDialog(this, "⚠ Chọn điểm để sửa!");
-            return;
-        }
+    private void editScoreDialog(int id, String msv, String maMon, double diem) {
+        JDialog d = new JDialog(SwingUtilities.getWindowAncestor(this), "Sửa điểm", Dialog.ModalityType.APPLICATION_MODAL);
+        d.setSize(420,260); d.setLocationRelativeTo(this);
+        JPanel p = new JPanel(new GridLayout(0,2,8,8)); p.setBorder(new EmptyBorder(12,12,12,12));
+        JTextField tfMsv = new JTextField(msv); JTextField tfMa = new JTextField(maMon); JTextField tfDiem = new JTextField(String.valueOf(diem));
+        p.add(new JLabel("MSV:")); p.add(tfMsv);
+        p.add(new JLabel("Mã môn:")); p.add(tfMa);
+        p.add(new JLabel("Điểm:")); p.add(tfDiem);
+        JPanel btnP = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton bs = styledButton("Lưu", new Color(41,128,185)); JButton bc = styledButton("Hủy", new Color(149,165,166));
+        btnP.add(bs); btnP.add(bc);
+        d.add(p, BorderLayout.CENTER); d.add(btnP, BorderLayout.SOUTH);
 
-        JDialog dialog = createDialog("✏️ Sửa Điểm");
-
-        JTextField txtMsv = new JTextField(s.getMsv());
-        txtMsv.setEditable(false);
-        JTextField txtMaMon = new JTextField(s.getMaMon());
-        txtMaMon.setEditable(false);
-        JTextField txtDiem = new JTextField(String.valueOf(s.getDiem()));
-
-        JPanel form = createFormPanel(
-                new String[]{"Mã SV:", "Mã môn:", "Điểm:"},
-                new JComponent[]{txtMsv, txtMaMon, txtDiem}
-        );
-        dialog.add(form, BorderLayout.CENTER);
-
-        JButton btnSave = createStyledButton("💾 Lưu", new Color(41, 128, 185));
-        JButton btnCancel = createStyledButton("❌ Hủy", new Color(149, 165, 166));
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottom.add(btnSave);
-        bottom.add(btnCancel);
-        dialog.add(bottom, BorderLayout.SOUTH);
-
-        btnSave.addActionListener(e -> {
-            try {
-                double diem;
-                try {
-                    diem = Double.parseDouble(txtDiem.getText().trim());
-                    if (diem < 0 || diem > 10) throw new NumberFormatException();
-                } catch (NumberFormatException ex) {
-                    JOptionPane.showMessageDialog(dialog, "⚠ Điểm phải hợp lệ (0-10)!");
-                    return;
-                }
-
-                Score updated = new Score(s.getMsv(), s.getMaMon(), diem);
-                scoreService.updateScore(updated);
-                JOptionPane.showMessageDialog(dialog, "✅ Cập nhật thành công!");
-                loadScores();
-                dialog.dispose();
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(dialog, "❌ Lỗi cập nhật điểm: " + ex.getMessage());
-            }
+        bs.addActionListener(e -> {
+            if (tfMsv.getText().trim().isEmpty() || tfMa.getText().trim().isEmpty()) { JOptionPane.showMessageDialog(d, "MSV và Mã môn không được trống"); return; }
+            double nd;
+            try { nd = Double.parseDouble(tfDiem.getText().trim()); if (nd < 0 || nd > 10) throw new NumberFormatException(); }
+            catch (Exception ex) { JOptionPane.showMessageDialog(d, "Điểm phải là số trong khoảng 0 - 10"); return; }
+            try { scoreService.updateScore(new Score(id, tfMsv.getText().trim(), tfMa.getText().trim(), nd)); loadScores(); d.dispose(); }
+            catch (Exception ex) { JOptionPane.showMessageDialog(d, "Lỗi khi cập nhật: " + ex.getMessage()); }
         });
-
-        btnCancel.addActionListener(e -> dialog.dispose());
-        dialog.setVisible(true);
+        bc.addActionListener(e -> d.dispose());
+        d.setVisible(true);
     }
 
-    // ============================
-    // Xóa điểm
-    // ============================
     private void deleteScoreAction() {
         int row = scoreTable.getSelectedRow();
-        if (row == -1) {
-            JOptionPane.showMessageDialog(this, "⚠ Vui lòng chọn điểm để xóa!");
-            return;
+        if (row == -1) { JOptionPane.showMessageDialog(this, "Chọn điểm để xóa"); return; }
+        int modelRow = scoreTable.convertRowIndexToModel(row);
+        int id = Integer.parseInt(model.getValueAt(modelRow, 0).toString());
+        int c = JOptionPane.showConfirmDialog(this, "Xóa điểm ID " + id + " ?", "Xác nhận", JOptionPane.YES_NO_OPTION);
+        if (c == JOptionPane.YES_OPTION) {
+            try { scoreService.deleteScore(id); loadScores(); }
+            catch (Exception ex) { JOptionPane.showMessageDialog(this, "Lỗi khi xóa: " + ex.getMessage()); }
         }
-        String msv = (String) scoreModel.getValueAt(row, 1);
-        String maMon = (String) scoreModel.getValueAt(row, 3);
-        int confirm = JOptionPane.showConfirmDialog(this,
-                "Xóa điểm của sinh viên " + msv + " cho môn " + maMon + " ?",
-                "Xác nhận", JOptionPane.YES_NO_OPTION);
-        if (confirm == JOptionPane.YES_OPTION) {
-            try {
-                scoreService.deleteScore(row);
-                loadScores();
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, "Lỗi xóa điểm: " + e.getMessage());
-            }
-        }
-    }
-
-    // ============================
-    // Helper
-    // ============================
-    private JDialog createDialog(String title) {
-        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), title, true);
-        dialog.setSize(420, 260);
-        dialog.setLocationRelativeTo(this);
-        dialog.setLayout(new BorderLayout(10, 10));
-        dialog.getContentPane().setBackground(new Color(250, 248, 255));
-        return dialog;
-    }
-
-    private JPanel createFormPanel(String[] labels, JComponent[] fields) {
-        JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBackground(new Color(250, 248, 255));
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-
-        for (int i = 0; i < labels.length; i++) {
-            gbc.gridx = 0;
-            gbc.gridy = i;
-            gbc.weightx = 0.3;
-            JLabel label = new JLabel(labels[i]);
-            label.setFont(new Font("Segoe UI", Font.BOLD, 13));
-            panel.add(label, gbc);
-
-            gbc.gridx = 1;
-            gbc.weightx = 0.7;
-            panel.add(fields[i], gbc);
-        }
-        return panel;
     }
 }
-
-    // ================================
-    // Xóa điểm
-    // ================================
-
-
- 
-
